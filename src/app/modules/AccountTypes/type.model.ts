@@ -5,7 +5,7 @@ const accountTypeSchema = new Schema<TTypeAccount>(
   {
     type: {
       type: String,
-      enum: ["Savings", "Checkout", "Business"],
+      enum: ["Savings", "Checking", "Checkout", "Business"],
       required: true,
     },
     description: {

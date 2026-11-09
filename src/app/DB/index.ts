@@ -9,6 +9,7 @@ import {
   DEFAULT_PRIVACY_HTML,
   DEFAULT_TERMS_HTML,
 } from "../modules/Settings/legalDefaults";
+import { seedAccountTypes } from "../modules/AccountTypes/type.seed";
 
 const seedPassword =
   process.env.SEED_DEMO_PASSWORD ||
@@ -88,6 +89,7 @@ const seedSuperAdmin = async () => {
   if (!seedPassword) {
     await seedBankSettings();
     await seedLegalPages();
+    await seedAccountTypes();
     return;
   }
 
@@ -120,6 +122,7 @@ const seedSuperAdmin = async () => {
 
   await seedBankSettings();
   await seedLegalPages();
+  await seedAccountTypes();
 };
 
 export default seedSuperAdmin;

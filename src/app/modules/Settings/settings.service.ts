@@ -77,8 +77,17 @@ export const seedBankSettings = async () => {
     });
     return;
   }
-  if (!exists.website) {
-    exists.website = DEFAULT_WEBSITE_CONTENT;
+
+  // Backfill website content if missing/empty so home + features never render blank.
+  const website = exists.website || ({} as TWebsiteContent);
+  const needsWebsite =
+    !exists.website ||
+    !website.services?.length ||
+    !website.faqs?.length ||
+    !website.heroStats?.length;
+
+  if (needsWebsite) {
+    exists.website = mergeWebsite(website);
     await exists.save();
   }
 };
