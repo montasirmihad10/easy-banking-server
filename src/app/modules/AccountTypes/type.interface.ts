@@ -1,5 +1,5 @@
 export interface TTypeAccount {
-  type: "Savings" | "Checkout" | "Business";
+  type: "Savings" | "Checking" | "Checkout" | "Business";
   description: string;
   features: string[];
 }
