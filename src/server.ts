@@ -10,6 +10,13 @@ import cron from "node-cron";
 let server: Server;
 
 async function main() {
+  // Vercel uses api/index.js — never boot a long-lived listener there.
+  if (process.env.VERCEL) {
+    // eslint-disable-next-line no-console
+    console.log("Vercel runtime detected; skipping local server bootstrap");
+    return;
+  }
+
   try {
     if (!config.database_url) {
       throw new Error("DATABASE_URL is not defined in environment variables");
