@@ -7,6 +7,7 @@ import { BranchModel } from "../../modules/Branches/branch.model";
 import { TransactionModel } from "../../modules/Transactions/transaction.model";
 import { TLoan } from "../../modules/Loan/loan.interface";
 import { TBranch } from "../../modules/Branches/branch.interface";
+import { sendNotification } from "../../modules/Notification/notification.utils";
 
 type LoanWithBranchPopulated = TLoan & {
   branch: TBranch | Types.ObjectId;
@@ -128,6 +129,21 @@ export const completeDepostiLoan = async (
     );
 
     await session.commitTransaction();
+    if (isLoanExist.user) {
+      void sendNotification({
+        recipientId: isLoanExist.user,
+        type: "loan",
+        title: allPaid ? "Loan fully paid" : "Loan payment received",
+        message: allPaid
+          ? `Your loan repayment of ${paidBalance} cleared the remaining balance.`
+          : `Your loan repayment of ${paidBalance} was received. Remaining balance: ${remainingBalance}.`,
+        data: {
+          loanId,
+          transactionId: pendingTxn._id,
+          monthsToPay,
+        },
+      });
+    }
     return updatedPay;
   } catch (error) {
     await session.abortTransaction();

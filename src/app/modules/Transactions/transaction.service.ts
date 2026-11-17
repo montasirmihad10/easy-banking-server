@@ -492,6 +492,23 @@ const createTransfer = async (user: TJwtUser, payload: TTransaction) => {
       `Savings accounts can only transfer ${settings.savingsTransferDailyAmountLimit} ${settings.currency} per day`,
     );
   }
+  if (
+    isFromAccountExist.accountType === "savings" &&
+    settings.savingsTransferDailyCountLimit != null
+  ) {
+    const perDayTransfers = await TransactionModel.countDocuments({
+      fromAccount: isFromAccountExist.accountNumber,
+      transactionType: "transfer",
+      status: "completed",
+      createdAt: { $gte: startOfDay },
+    });
+    if (perDayTransfers >= settings.savingsTransferDailyCountLimit) {
+      throw new AppError(
+        HttpStatus.BAD_REQUEST,
+        `Savings accounts can make only ${settings.savingsTransferDailyCountLimit} transfers per day`,
+      );
+    }
+  }
 
   const session = await mongoose.startSession();
   try {
@@ -729,10 +746,15 @@ export const downloadTransaction = async (id: string, user: TJwtUser) => {
   return Buffer.concat(buffers);
 };
 
-const getStripeSuccesSession = async (id: string) => {
+const getStripeSuccesSession = async (id: string, user: TJwtUser) => {
   const result = await TransactionModel.findById(id);
   if (!result) {
     throw new AppError(HttpStatus.NOT_FOUND, "Transaction not found");
+  }
+  if (user.role === "customer") {
+    if (String(result.user) !== String(user.user)) {
+      throw new AppError(HttpStatus.FORBIDDEN, "Not authorized");
+    }
   }
   return result;
 };

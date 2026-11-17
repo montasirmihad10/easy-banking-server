@@ -103,7 +103,8 @@ const getPersonalTransactions = catchAsync(async (req, res) => {
 
 const getStripeSuccesSession = catchAsync(async (req, res) => {
   const id = getParam(req, "id");
-  const result = await transactionServices.getStripeSuccesSession(id);
+  const user = req.user as TJwtUser;
+  const result = await transactionServices.getStripeSuccesSession(id, user);
 
   sendResponse(res, {
     statusCode: HttpStatus.OK,

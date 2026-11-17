@@ -53,7 +53,16 @@ export const sendNotification = async (payload: SendNotificationPayload) => {
   try {
     const user = await User.findById(recipientIdStr).select("fcmToken");
     if (user?.fcmToken?.length) {
-      await sendPushNotifications(user.fcmToken, title, message);
+      const pushData: Record<string, string> = {
+        type: String(type || "general"),
+        notificationId: savedNotification?._id?.toString() || "",
+      };
+      if (data) {
+        for (const [key, value] of Object.entries(data)) {
+          if (value != null) pushData[key] = String(value);
+        }
+      }
+      await sendPushNotifications(user.fcmToken, title, message, pushData);
     }
   } catch (err) {
     // eslint-disable-next-line no-console

@@ -1,7 +1,12 @@
 import Stripe from "stripe";
 import { Response, Request } from "express";
 import config from "../config";
-import { handleCheckoutSessionCompleted } from "./stripeWebhook.service";
+import {
+  handleCheckoutSessionAsyncPaymentFailed,
+  handleCheckoutSessionAsyncPaymentSucceeded,
+  handleCheckoutSessionCompleted,
+  handleCheckoutSessionExpired,
+} from "./stripeWebhook.service";
 
 const stripe = new Stripe(config.stripe_secret_key as string, {
   apiVersion: "2026-10-28.endive",
@@ -36,16 +41,21 @@ export const stripeWebhookHandler = async (
         await handleCheckoutSessionCompleted(event.data.object);
         break;
 
-      case "payment_intent.succeeded":
-        // await handlePaymentIntentSucceeded(event.data.object);
+      case "checkout.session.async_payment_succeeded":
+        await handleCheckoutSessionAsyncPaymentSucceeded(event.data.object);
         break;
 
-      case "charge.succeeded":
-        // await handleChargeSucceeded(event.data.object);
+      case "checkout.session.async_payment_failed":
+        await handleCheckoutSessionAsyncPaymentFailed(event.data.object);
+        break;
+
+      case "checkout.session.expired":
+        await handleCheckoutSessionExpired(event.data.object);
         break;
 
       default:
-        console.log(`Unhandled event type ${event.type}`);
+        // Ignore unrelated Stripe events (payment_intent/charge are redundant for Checkout)
+        break;
     }
 
     // ✅ Always send a 200 response

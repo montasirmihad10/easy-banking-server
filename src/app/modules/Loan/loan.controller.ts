@@ -19,7 +19,8 @@ const requestLoan = catchAsync(async (req, res) => {
 
 const updateRequestedLoan = catchAsync(async (req, res) => {
   const id = getParam(req, "id");
-  const result = await loadServices.updateRequestedLoan(id, req.body);
+  const reviewer = req.user as TJwtUser;
+  const result = await loadServices.updateRequestedLoan(id, req.body, reviewer);
 
   sendResponse(res, {
     statusCode: HttpStatus.OK,

@@ -26,6 +26,36 @@ type LoanWithBranchPopulated = TLoan & {
 
 const searchLoans = ["accountNumber"];
 
+/** Flat annual interest: principal × rate × (termMonths / 12). */
+export const calculateLoanInterest = (
+  loanAmount: number,
+  annualRate: number,
+  termMonths: number,
+) => {
+  const amount = Number(loanAmount);
+  const rate = Number(annualRate);
+  const term = Number(termMonths);
+  if (!amount || amount <= 0 || !term || term <= 0) {
+    throw new AppError(HttpStatus.BAD_REQUEST, "Invalid loan amount or term");
+  }
+  return Math.round(amount * rate * (term / 12));
+};
+
+const PENDING_STRIPE_TTL_MS = 30 * 60 * 1000;
+
+const failStalePendingLoanPayments = async (loanId: Types.ObjectId) => {
+  const cutoff = new Date(Date.now() - PENDING_STRIPE_TTL_MS);
+  await TransactionModel.updateMany(
+    {
+      loan: loanId,
+      transactionType: "deposit-loan",
+      status: "pending",
+      createdAt: { $lt: cutoff },
+    },
+    { status: "failed", description: "Stripe checkout expired / abandoned" },
+  );
+};
+
 const requestLoan = async (user: TJwtUser, payload: TLoan) => {
   const isUserExist = await User.findById(user?.user);
   if (!isUserExist) {
@@ -48,6 +78,14 @@ const requestLoan = async (user: TJwtUser, payload: TLoan) => {
     throw new AppError(HttpStatus.BAD_REQUEST, "Invalid loan amount");
   }
 
+  const termInMonths = Number(payload.term);
+  if (!Number.isInteger(termInMonths) || termInMonths < 1 || termInMonths > 120) {
+    throw new AppError(
+      HttpStatus.BAD_REQUEST,
+      "Loan term must be between 1 and 120 months",
+    );
+  }
+
   const settings = await getBankSettings();
 
   // Block if open loan count exceeds settings
@@ -68,10 +106,8 @@ const requestLoan = async (user: TJwtUser, payload: TLoan) => {
   payload.status = "pending";
   // Never trust client interest rates — bank settings control pricing.
   payload.interestRate = settings.defaultLoanInterestRate;
-  const termInMonths = payload.term;
-  payload.endDate = dayjs(payload.startDate)
-    .add(termInMonths as number, "month")
-    .toDate();
+  payload.term = termInMonths;
+  payload.endDate = dayjs(payload.startDate).add(termInMonths, "month").toDate();
 
   const loan = await LoanModel.create(payload);
   void notifyStaff({
@@ -87,12 +123,35 @@ const requestLoan = async (user: TJwtUser, payload: TLoan) => {
  * Disburse only on pending → approved (one-time).
  * Rejects / other statuses do not touch money.
  */
-const updateRequestedLoan = async (id: string, payload: Partial<TLoan>) => {
+const updateRequestedLoan = async (
+  id: string,
+  payload: Partial<TLoan>,
+  reviewer?: TJwtUser,
+) => {
   const isLoanExist = (await LoanModel.findById(id).populate(
     "branch",
   )) as LoanWithBranchPopulated | null;
   if (!isLoanExist) {
     throw new AppError(HttpStatus.NOT_FOUND, "The Loan request is not found");
+  }
+
+  if (reviewer?.role === "manager") {
+    const branchId =
+      typeof isLoanExist.branch === "object" &&
+      isLoanExist.branch &&
+      "_id" in (isLoanExist.branch as object)
+        ? (isLoanExist.branch as TBranch & { _id: Types.ObjectId })._id
+        : isLoanExist.branch;
+    const managed = await BranchModel.findOne({
+      _id: branchId,
+      managers: reviewer.user,
+    }).select("_id");
+    if (!managed) {
+      throw new AppError(
+        HttpStatus.FORBIDDEN,
+        "Managers can only review loans for their own branch",
+      );
+    }
   }
 
   const nextStatus = payload.status;
@@ -150,6 +209,12 @@ const updateRequestedLoan = async (id: string, payload: Partial<TLoan>) => {
   const settings = await getBankSettings();
   const loanAmount = Number(isLoanExist.loanAmount);
   const term = Number(payload.term || isLoanExist.term);
+  if (!Number.isInteger(term) || term < 1 || term > 120) {
+    throw new AppError(
+      HttpStatus.BAD_REQUEST,
+      "Loan term must be between 1 and 120 months",
+    );
+  }
   const interestRate = Number(
     payload.interestRate ??
       isLoanExist.interestRate ??
@@ -159,7 +224,7 @@ const updateRequestedLoan = async (id: string, payload: Partial<TLoan>) => {
     ? dayjs(payload.startDate).toDate()
     : dayjs(isLoanExist.startDate).toDate();
   const endDate = dayjs(startDate).add(term, "month").endOf("month").toDate();
-  const totalInterest = loanAmount * interestRate;
+  const totalInterest = calculateLoanInterest(loanAmount, interestRate, term);
   const totalPayable = Math.round(loanAmount + totalInterest);
   const monthlyDue = Math.ceil(totalPayable / term);
 
@@ -319,7 +384,9 @@ const payLoan = async (
     );
   }
 
-  // Prevent overlapping pending loan payments
+  // Expire abandoned Stripe checkouts so repayments are not permanently locked
+  await failStalePendingLoanPayments(isLoanExist._id);
+
   const existingPending = await TransactionModel.findOne({
     loan: isLoanExist._id,
     transactionType: "deposit-loan",
@@ -445,10 +512,13 @@ const myLoan = async (userId: string) => {
     throw new AppError(HttpStatus.BAD_REQUEST, "Invalid user ID");
   }
 
+  // Prefer open loans; never surface rejected/paid as the active loan.
   const loans = await LoanModel.findOne({
     user: new Types.ObjectId(userId),
-    status: { $ne: "paid" },
-  }).populate("branch user account");
+    status: { $in: ["pending", "approved", "active"] },
+  })
+    .sort({ createdAt: -1 })
+    .populate("branch user account");
 
   if (!loans) {
     throw new AppError(HttpStatus.NOT_FOUND, "You don't have any loan");
